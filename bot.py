@@ -122,12 +122,12 @@ async def send_group_welcome(context, user):
     await context.bot.send_message(
         chat_id=VIP_CHAT_ID,
         text=(
-            f"👋 Bienvenido {mention_html(user.id, user.first_name)} "
-            "al grupo VIP de Flanders y Fred - OKX.\n\n"
-            "Aquí encontrarás bots exclusivos, tips de trading y beneficios por pertenecer a nuestra comunidad, "
-            "además de soporte personalizado en OKX.\n\n"
-            "¡Saludos!"
-        ),
+            f"🚀🔥 ¡BIENVENIDO {mention_html(user.id, user.first_name)}! 🔥🚀\n\n"
+        "Has entrado oficialmente al *VIP de Flanders y Fred - OKX*.\n\n"
+        "Aquí encontrarás bots exclusivos 🤖, tips de trading 📈 y beneficios especiales por formar parte de nuestra comunidad privada.\n\n"
+        "Diversifica,participa y gana recomensas 💰\n\n"
+        "¡Vamos con todo! 🚀🔥"
+    ),
         parse_mode=ParseMode.HTML
     )
 
