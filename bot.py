@@ -125,7 +125,7 @@ async def send_group_welcome(context, user):
             f"🚀🔥 ¡BIENVENIDO {mention_html(user.id, user.first_name)}! 🔥🚀\n\n"
         "Has entrado oficialmente al *VIP de Flanders y Fred - OKX*.\n\n"
         "Aquí encontrarás bots exclusivos 🤖, tips de trading 📈 y beneficios especiales por formar parte de nuestra comunidad privada.\n\n"
-        "Diversifica,participa y gana recomensas 💰\n\n"
+        "Diversifica, participa y gana recomensas 💰\n\n"
         "¡Vamos con todo! 🚀🔥"
     ),
         parse_mode=ParseMode.HTML
