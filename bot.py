@@ -130,8 +130,6 @@ async def send_group_welcome(context, user):
             "💎 Estrategias que no publicamos en ningún otro lugar\n"
             "🎁 Beneficios especiales por pertenecer a nuestra comunidad\n"
             "🧠 Soporte personalizado en OKX\n\n"
-            "⚡ Prepárate para llevar tu trading al siguiente nivel.\n"
-            "⚠️ Las oportunidades no esperan.\n\n"
             "¡Saludos y a romper el mercado! 💥"
         ),
         parse_mode=ParseMode.HTML
