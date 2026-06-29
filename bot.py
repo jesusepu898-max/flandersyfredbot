@@ -54,10 +54,6 @@ ADMIN_IDS = [
 # DB_PATH=/var/data/flanders_fred_bot.db
 DB_PATH = os.environ.get("DB_PATH", "/var/data/flanders_fred_bot.db")
 
-# Opcional en Render:
-# VIP_GROUP_LINK=https://t.me/+TU_LINK_DEL_GRUPO_VIP
-VIP_GROUP_LINK = os.environ.get("VIP_GROUP_LINK", "").strip()
-
 TZ_AR = ZoneInfo("America/Argentina/Buenos_Aires")
 GROUP_NAME = "Comunidad Flanders y Fred VIP by OKX"
 OKX_BASE_URL = "https://www.okx.com"
@@ -157,7 +153,7 @@ def init_db():
     conn = db()
     cur = conn.cursor()
 
-    # Tabla original de usuarios validados con UID.
+    # Usuarios validados con UID
     cur.execute("""
     CREATE TABLE IF NOT EXISTS users (
         telegram_id INTEGER PRIMARY KEY,
@@ -185,8 +181,7 @@ def init_db():
     if "last_checked_at" not in existing_columns:
         cur.execute("ALTER TABLE users ADD COLUMN last_checked_at TEXT")
 
-    # Tabla nueva para usuarios que interactuaron con el bot,
-    # incluso si todavía no enviaron UID.
+    # Usuarios que interactuaron con el bot, aunque todavía no hayan enviado UID
     cur.execute("""
     CREATE TABLE IF NOT EXISTS user_states (
         telegram_id INTEGER PRIMARY KEY,
@@ -807,7 +802,7 @@ def format_master_volume_report(report):
 # ─────────────────────────────
 def format_uid_report(report):
     if report is None:
-        return "❌ UID no encontrado en tu comunidad de afiliados OKX."
+        return "❌ UID no encontrado en la comunidad de afiliados OKX."
 
     first_trade = "Sí" if report["did_first_trade"] else "No"
     community = "Sí" if report["is_local_community"] else "No registrado en DB local"
@@ -819,7 +814,7 @@ def format_uid_report(report):
 
     return (
         f"📊 Reporte UID: {report['uid']}\n\n"
-        f"✅ Parte de tu afiliado OKX: {affiliate}\n"
+        f"✅ Parte del afiliado OKX: {affiliate}\n"
         f"👥 Registrado en DB comunidad: {community}\n"
         f"📅 Fecha registro / join: {report.get('register_time') or 'No disponible'}\n"
         f"📅 Fecha KYC: {report.get('kyc_time') or 'No disponible'}\n"
@@ -912,15 +907,16 @@ def new_user_text():
         "1️⃣ Crea tu cuenta en OKX con el link oficial:\n\n"
         f"{OKX_JOIN_LINK}\n\n"
         "2️⃣ Completa tu registro y verificación KYC.\n\n"
-        "3️⃣ Cuando tu cuenta esté lista, envíame tu UID de OKX por este chat.\n\n"
-        "4️⃣ Si tu UID está correctamente vinculado, te daré acceso al grupo VIP.\n\n"
+        "3️⃣ Solicita acceso al grupo VIP.\n\n"
+        "4️⃣ Cuando el bot te escriba, envía tu UID de OKX por este chat.\n\n"
+        "5️⃣ Si tu UID está correctamente vinculado, el bot aprobará tu acceso automáticamente al grupo VIP.\n\n"
         "Dentro del grupo VIP encontrarás:\n\n"
         "🤖 Links de bots disponibles\n"
         "📈 Copy trading\n"
         "🎁 Bonos y beneficios especiales\n"
         "📚 Información y soporte para operar en OKX\n\n"
         f"{terms_text()}\n\n"
-        "🚀 Así de simple: crea tu cuenta, valida tu UID y accede a la comunidad VIP para comenzar a participar.\n\n"
+        "🚀 Así de simple: crea tu cuenta, solicita acceso, valida tu UID y entra a la comunidad VIP para comenzar a participar.\n\n"
         "Cuando tengas tu UID, envíamelo usando solo números."
     )
 
@@ -932,7 +928,7 @@ def existing_user_text():
         f"{VALID_REF_CODES_TEXT}\n\n"
         "✅ ¿Cómo saber si estás vinculado correctamente?\n\n"
         "Envíame tu UID de OKX por este chat.\n\n"
-        "Si el sistema valida tu UID, podrás avanzar al grupo VIP.\n\n"
+        "Si el sistema valida tu UID, el bot podrá aprobar tu acceso al grupo VIP.\n\n"
         "Si no puedes avanzar, significa que tu cuenta no está vinculada correctamente al referido.\n\n"
         "Si ya tienes cuenta, pero no estás vinculado al código de referido, completa el siguiente formulario:\n\n"
         f"{REBIND_FORM_LINK}\n\n"
@@ -1016,16 +1012,6 @@ def not_affiliated_update_text():
     )
 
 
-def group_link_text():
-    if VIP_GROUP_LINK:
-        return f"\n\nPuedes acceder o solicitar acceso al grupo VIP aquí:\n{VIP_GROUP_LINK}"
-
-    return (
-        "\n\nSi ya solicitaste acceso al grupo VIP, tu solicitud será aprobada automáticamente. "
-        "Si todavía no lo hiciste, solicita acceso desde el link del grupo VIP compartido por la comunidad."
-    )
-
-
 def validated_text(flow):
     if flow == "update":
         return (
@@ -1033,15 +1019,13 @@ def validated_text(flow):
             "Gracias por actualizar tu información. Tu cuenta aparece vinculada a la comunidad de Flanders y Fred.\n\n"
             "Puedes acceder de forma permanente a los bots y copy trading de Flanders y Fred mientras mantengas "
             "las condiciones de la comunidad."
-            f"{group_link_text()}"
         )
 
     return (
         "✅ UID verificado correctamente.\n\n"
         "Tu cuenta aparece vinculada a la comunidad de Flanders y Fred.\n\n"
-        "Acceso aprobado. Dentro del grupo VIP encontrarás links de bots, copy trading, bonos, beneficios "
-        "e información para operar en OKX."
-        f"{group_link_text()}"
+        "Si ya solicitaste acceso al grupo VIP, tu solicitud será aprobada automáticamente.\n\n"
+        "Dentro del grupo VIP encontrarás links de bots, copy trading, bonos, beneficios e información para operar en OKX."
     )
 
 
@@ -1136,6 +1120,31 @@ async def flow_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def on_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.chat_join_request.from_user
+
+    row_validated = get_user_by_telegram_id(user.id)
+    row_state = get_user_state(user.id)
+
+    if row_validated or (row_state and row_state["status"] == "validated"):
+        await approve_user_if_possible(context, user)
+
+        try:
+            await send_welcome(context, user)
+        except Exception as e:
+            print(f"⚠️ No se pudo enviar bienvenida al grupo: {e}")
+
+        try:
+            await context.bot.send_message(
+                chat_id=user.id,
+                text=(
+                    "✅ Acceso aprobado.\n\n"
+                    "Tu UID ya estaba verificado correctamente. "
+                    "Bienvenido a la comunidad VIP de Flanders y Fred."
+                )
+            )
+        except Exception as e:
+            print(f"⚠️ No se pudo enviar DM al usuario validado {user.id}: {e}")
+
+        return
 
     save_user_state(
         telegram_id=user.id,
@@ -1290,17 +1299,18 @@ async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
         source="uid_validated"
     )
 
-    await approve_user_if_possible(context, user)
+    approved = await approve_user_if_possible(context, user)
 
     await context.bot.send_message(
         chat_id=user.id,
         text=validated_text(flow)
     )
 
-    try:
-        await send_welcome(context, user)
-    except Exception as e:
-        print(f"⚠️ No se pudo enviar bienvenida al grupo: {e}")
+    if approved:
+        try:
+            await send_welcome(context, user)
+        except Exception as e:
+            print(f"⚠️ No se pudo enviar bienvenida al grupo: {e}")
 
 
 # ─────────────────────────────
@@ -1503,6 +1513,9 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     for user in get_all_users():
         try:
+            if user["uid"] == "BYPASS":
+                continue
+
             vol = get_uid_volume(user["uid"])
 
             if vol is not None:
@@ -1524,9 +1537,6 @@ async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(mensaje)
 
 
-# ─────────────────────────────
-# ADMIN: VOLUMEN POR UID
-# ─────────────────────────────
 async def voluid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != "private":
         await update.message.reply_text(
@@ -1570,9 +1580,6 @@ async def voluid(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Error consultando el UID.")
 
 
-# ─────────────────────────────
-# ADMIN: REPORTE POR UID
-# ─────────────────────────────
 async def checkuid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != "private":
         await update.message.reply_text("Por seguridad, usa este comando por privado.")
@@ -1602,9 +1609,6 @@ async def checkuid(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Error consultando el UID.")
 
 
-# ─────────────────────────────
-# ADMIN: REPORTE MÚLTIPLE
-# ─────────────────────────────
 async def checkuids(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != "private":
         await update.message.reply_text("Por seguridad, usa este comando por privado.")
@@ -1667,9 +1671,6 @@ async def checkuids(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
-# ─────────────────────────────
-# ADMIN: REPORTE CSV DE LISTA
-# ─────────────────────────────
 async def checkuidscsv(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != "private":
         await update.message.reply_text("Por seguridad, usa este comando por privado.")
@@ -1819,9 +1820,6 @@ async def checkuidscsv(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# ─────────────────────────────
-# ADMIN: DEBUG CAMPOS OKX
-# ─────────────────────────────
 async def debuguid(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != "private":
         await update.message.reply_text("Por seguridad, usa este comando por privado.")
@@ -1867,9 +1865,6 @@ async def debuguid(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Error generando debug del UID.")
 
 
-# ─────────────────────────────
-# ADMIN: INFORME CSV
-# ─────────────────────────────
 async def informe(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != "private":
         await update.message.reply_text(
@@ -1895,7 +1890,10 @@ async def informe(update: Update, context: ContextTypes.DEFAULT_TYPE):
         uid = row["uid"]
 
         try:
-            report = get_uid_report(uid)
+            if uid == "BYPASS":
+                report = None
+            else:
+                report = get_uid_report(uid)
 
             if report is None:
                 vol_month = row["last_vol_month"] or 0
@@ -1998,6 +1996,9 @@ async def generate_admin_report(context, title):
 
     for u in usuarios:
         try:
+            if u["uid"] == "BYPASS":
+                continue
+
             vol = get_uid_volume(u["uid"])
 
             if vol is not None:
@@ -2054,7 +2055,7 @@ def main():
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, track_new_group_members))
 
     # Privado: recepción UID
-    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT, handle_private))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, handle_private))
 
     app.job_queue.run_daily(
         weekly_admin_report,
