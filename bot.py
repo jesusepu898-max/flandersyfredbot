@@ -153,7 +153,6 @@ def init_db():
     conn = db()
     cur = conn.cursor()
 
-    # Usuarios validados con UID
     cur.execute("""
     CREATE TABLE IF NOT EXISTS users (
         telegram_id INTEGER PRIMARY KEY,
@@ -181,7 +180,6 @@ def init_db():
     if "last_checked_at" not in existing_columns:
         cur.execute("ALTER TABLE users ADD COLUMN last_checked_at TEXT")
 
-    # Usuarios que interactuaron con el bot, aunque todavía no hayan enviado UID
     cur.execute("""
     CREATE TABLE IF NOT EXISTS user_states (
         telegram_id INTEGER PRIMARY KEY,
@@ -874,7 +872,30 @@ def welcome_menu_text():
         f"👋 Hola, soy el asistente oficial de {GROUP_NAME}.\n\n"
         "Te voy a guiar para acceder o mantener tu acceso a los bots y copy trading de la comunidad.\n\n"
         "Elige una opción para continuar:"
+    )
 
+
+def terms_text():
+    return (
+        "📌 Términos y condiciones importantes\n\n"
+        "✅ La inversión mínima depende del bot que elijas, pero ronda en 25 USDT. "
+        "Actualmente hay bots sobre diferentes activos como XAU, ETH, BTC, TSLA, QQQ, XAG, XRP, SPY, petróleo, "
+        "acciones tecnológicas y otros instrumentos disponibles.\n\n"
+        "✅ Existen algunos bots exclusivos con mínimos de inversión mayores a 1000 USDT. "
+        "Más información en el grupo VIP.\n\n"
+        "✅ La inversión mínima para copy trading depende de cada trader o estrategia. "
+        "En general, puede comenzar desde aproximadamente 100 USDT.\n\n"
+        "✅ El servicio de bots y copy trading es gratuito. Los bots no están a la venta y no hay membresías. "
+        "Funcionan únicamente en OKX. No operan en brokers externos ni en MT5.\n\n"
+        "✅ Tú tienes el control total de tu cuenta de OKX. Puedes seguir o dejar de seguir un bot o copy trading "
+        "cuando lo decidas. Puedes depositar más o retirar tu capital cuando quieras.\n\n"
+        "❌ No garantizamos rendimientos fijos ni seguros.\n\n"
+        "❌ Los bots no funcionan como un CDT, depósito a plazo o producto de renta fija.\n\n"
+        "❌ No somos asesores financieros. Cada usuario debe evaluar por su cuenta qué bot, copy trading "
+        "o estrategia desea seguir.\n\n"
+        "❌ No captamos dinero del público ni gestionamos recursos de terceros.\n\n"
+        "❌ No somos una entidad financiera, casa de valores, sociedad comisionista de bolsa "
+        "ni administradores de portafolios."
     )
 
 
@@ -892,7 +913,6 @@ def new_user_text():
         "📈 Copy trading\n"
         "🎁 Bonos y beneficios especiales\n"
         "📚 Información y soporte para operar en OKX\n\n"
-        f"{terms_text()}\n\n"
         "🚀 Así de simple: crea tu cuenta, solicita acceso, valida tu UID y entra a la comunidad VIP para comenzar a participar.\n\n"
         "Cuando tengas tu UID, envíamelo usando solo números."
     )
@@ -918,8 +938,6 @@ def existing_user_text():
         "Si te aparece un mensaje indicando que por el momento no puedes continuar, escribe al privado de Flanders "
         "y envía tu UID para revisar tu caso:\n\n"
         f"{FLANDERS_PRIVATE_LINK}\n\n"
-        f"{terms_text()}\n\n"
-        "🚀 Así de simple: valida tu UID y accede a la comunidad VIP para comenzar a participar.\n\n"
         "Ahora envíame tu UID usando solo números."
     )
 
@@ -943,11 +961,10 @@ def update_ref_text():
         "99142589\n\n"
         "En motivo, escribe:\n\n"
         "Quiero pertenecer a la comunidad de FLANDERS Y FRED\n\n"
-         "Ahora envíame tu UID usando solo números para darte acceso."
         "Si te aparece un mensaje indicando que por el momento no puedes continuar, escribe al privado de Flanders "
         "y envía tu UID para revisar tu caso:\n\n"
         f"{FLANDERS_PRIVATE_LINK}\n\n"
-       
+        "Ahora envíame tu UID usando solo números."
     )
 
 
@@ -964,7 +981,6 @@ def not_affiliated_existing_text():
         "99142589\n\n"
         "En motivo, escribe:\n\n"
         "Quiero pertenecer a la comunidad de FLANDERS Y FRED\n\n"
-         "Ahora envíame tu UID usando solo números para darte acceso."
         "Si te aparece un mensaje indicando que por el momento no puedes continuar, escribe al privado de Flanders "
         "y envía tu UID para revisar tu caso:\n\n"
         f"{FLANDERS_PRIVATE_LINK}"
@@ -985,7 +1001,6 @@ def not_affiliated_update_text():
         "99142589\n\n"
         "En motivo, escribe:\n\n"
         "Quiero pertenecer a la comunidad de FLANDERS Y FRED\n\n"
-         "Ahora envíame tu UID usando solo números para darte acceso."
         "Si te aparece un mensaje indicando que por el momento no puedes continuar, escribe al privado de Flanders "
         "y envía tu UID para revisar tu caso:\n\n"
         f"{FLANDERS_PRIVATE_LINK}"
@@ -999,79 +1014,22 @@ def validated_text(flow):
             "Gracias por actualizar tu información. Tu cuenta aparece vinculada a la comunidad de Flanders y Fred.\n\n"
             "Puedes acceder de forma permanente a los bots y copy trading de Flanders y Fred mientras mantengas "
             "las condiciones de la comunidad."
-            "📌 Términos y condiciones importantes\n\n"
-        "✅ La inversión mínima depende del bot que elijas, pero ronda en 25 USDT. "
-        "Actualmente hay bots sobre diferentes activos como XAU, ETH, BTC, TSLA, QQQ, XAG, XRP, SPY, petróleo, "
-        "acciones tecnológicas y otros instrumentos disponibles.\n\n"
-        "✅ Existen algunos bots exclusivos con mínimos de inversión mayores a 1000 USDT. "
-        "Más información en el grupo VIP.\n\n"
-        "✅ La inversión mínima para copy trading depende de cada trader o estrategia. "
-        "En general, puede comenzar desde aproximadamente 100 USDT.\n\n"
-        "✅ El servicio de bots y copy trading es gratuito. Los bots no están a la venta y no hay membresías. "
-        "Funcionan únicamente en OKX. No operan en brokers externos ni en MT5.\n\n"
-        "✅ Tú tienes el control total de tu cuenta de OKX. Puedes seguir o dejar de seguir un bot o copy trading "
-        "cuando lo decidas. Puedes depositar más o retirar tu capital cuando quieras.\n\n"
-        "❌ No garantizamos rendimientos fijos ni seguros.\n\n"
-        "❌ Los bots no funcionan como un CDT, depósito a plazo o producto de renta fija.\n\n"
-        "❌ No somos asesores financieros. Cada usuario debe evaluar por su cuenta qué bot, copy trading "
-        "o estrategia desea seguir.\n\n"
-        "❌ No captamos dinero del público ni gestionamos recursos de terceros.\n\n"
-        "❌ No somos una entidad financiera, casa de valores, sociedad comisionista de bolsa "
-        "ni administradores de portafolios."
         )
 
     return (
         "✅ UID verificado correctamente.\n\n"
         "Tu cuenta aparece vinculada a la comunidad de Flanders y Fred.\n\n"
+        "Si ya solicitaste acceso al grupo VIP, tu solicitud será aprobada automáticamente.\n\n"
         "Dentro del grupo VIP encontrarás links de bots, copy trading, bonos, beneficios e información para operar en OKX."
-        "📌 Términos y condiciones importantes\n\n"
-        "✅ La inversión mínima depende del bot que elijas, pero ronda en 25 USDT. "
-        "Actualmente hay bots sobre diferentes activos como XAU, ETH, BTC, TSLA, QQQ, XAG, XRP, SPY, petróleo, "
-        "acciones tecnológicas y otros instrumentos disponibles.\n\n"
-        "✅ Existen algunos bots exclusivos con mínimos de inversión mayores a 1000 USDT. "
-        "Más información en el grupo VIP.\n\n"
-        "✅ La inversión mínima para copy trading depende de cada trader o estrategia. "
-        "En general, puede comenzar desde aproximadamente 100 USDT.\n\n"
-        "✅ El servicio de bots y copy trading es gratuito. Los bots no están a la venta y no hay membresías. "
-        "Funcionan únicamente en OKX. No operan en brokers externos ni en MT5.\n\n"
-        "✅ Tú tienes el control total de tu cuenta de OKX. Puedes seguir o dejar de seguir un bot o copy trading "
-        "cuando lo decidas. Puedes depositar más o retirar tu capital cuando quieras.\n\n"
-        "❌ No garantizamos rendimientos fijos ni seguros.\n\n"
-        "❌ Los bots no funcionan como un CDT, depósito a plazo o producto de renta fija.\n\n"
-        "❌ No somos asesores financieros. Cada usuario debe evaluar por su cuenta qué bot, copy trading "
-        "o estrategia desea seguir.\n\n"
-        "❌ No captamos dinero del público ni gestionamos recursos de terceros.\n\n"
-        "❌ No somos una entidad financiera, casa de valores, sociedad comisionista de bolsa "
-        "ni administradores de portafolios."
     )
 
 
 def group_welcome_text(user):
     return (
         f"🚀👋 Bienvenido {mention_html(user.id, user.first_name)} al grupo {GROUP_NAME}.\n\n"
-        "Aquí encontrarás bots exclusivos, copy trading, tips de trading y beneficios por pertenecer a nuestra comunidad, "
-        "además de soporte personalizado en OKX.\n\n"
-        "Recuerda: los bots y copy trading no garantizan rendimientos fijos. Cada usuario debe evaluar su propio riesgo.\n\n"
+        "Aquí encontrarás bots exclusivos, copy trading, tips de trading y beneficios por pertenecer a nuestra comunidad.\n\n"
+        f"{terms_text()}\n\n"
         "¡Saludos y buenos trades! 📈"
-        "📌 Términos y condiciones importantes\n\n"
-        "✅ La inversión mínima depende del bot que elijas, pero ronda en 25 USDT. "
-        "Actualmente hay bots sobre diferentes activos como XAU, ETH, BTC, TSLA, QQQ, XAG, XRP, SPY, petróleo, "
-        "acciones tecnológicas y otros instrumentos disponibles.\n\n"
-        "✅ Existen algunos bots exclusivos con mínimos de inversión mayores a 1000 USDT. "
-        "Más información en el grupo VIP.\n\n"
-        "✅ La inversión mínima para copy trading depende de cada trader o estrategia. "
-        "En general, puede comenzar desde aproximadamente 100 USDT.\n\n"
-        "✅ El servicio de bots y copy trading es gratuito. Los bots no están a la venta y no hay membresías. "
-        "Funcionan únicamente en OKX. No operan en brokers externos ni en MT5.\n\n"
-        "✅ Tú tienes el control total de tu cuenta de OKX. Puedes seguir o dejar de seguir un bot o copy trading "
-        "cuando lo decidas. Puedes depositar más o retirar tu capital cuando quieras.\n\n"
-        "❌ No garantizamos rendimientos fijos ni seguros.\n\n"
-        "❌ Los bots no funcionan como un CDT, depósito a plazo o producto de renta fija.\n\n"
-        "❌ No somos asesores financieros. Cada usuario debe evaluar por su cuenta qué bot, copy trading "
-        "o estrategia desea seguir.\n\n"
-        "❌ No captamos dinero del público ni gestionamos recursos de terceros.\n\n"
-        "❌ No somos una entidad financiera, casa de valores, sociedad comisionista de bolsa "
-        "ni administradores de portafolios."
     )
 
 
@@ -1252,17 +1210,18 @@ async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
             source="bypass"
         )
 
-        await approve_user_if_possible(context, user)
+        approved = await approve_user_if_possible(context, user)
 
         await context.bot.send_message(
             chat_id=user.id,
             text="✔️ Código interno verificado. Acceso aprobado."
         )
 
-        try:
-            await send_welcome(context, user)
-        except Exception as e:
-            print(f"⚠️ No se pudo enviar bienvenida al grupo: {e}")
+        if approved:
+            try:
+                await send_welcome(context, user)
+            except Exception as e:
+                print(f"⚠️ No se pudo enviar bienvenida al grupo: {e}")
 
         return
 
