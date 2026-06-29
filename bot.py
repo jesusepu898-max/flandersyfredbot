@@ -3,6 +3,7 @@ import csv
 import hmac
 import json
 import time
+import re
 import base64
 import hashlib
 import sqlite3
@@ -39,6 +40,9 @@ from telegram.ext import (
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 VIP_CHAT_ID = int(os.environ["VIP_CHAT_ID"])
 
+# Grupo público donde el bot responderá cuando alguien escriba "bot" o "bots"
+PUBLIC_CHAT_ID = int(os.environ.get("PUBLIC_CHAT_ID", "-1003133540062"))
+
 OKX_API_KEY = os.environ["OKX_API_KEY"]
 OKX_API_SECRET = os.environ["OKX_API_SECRET"]
 OKX_API_PASSPHRASE = os.environ["OKX_API_PASSPHRASE"]
@@ -62,6 +66,8 @@ INSTRUMENTS_CACHE = {}
 OKX_JOIN_LINK = "https://www.okx.com/join/FLANDERSYFRED"
 REBIND_FORM_LINK = "https://www.okx.com/ul/J6l2R5"
 FLANDERS_PRIVATE_LINK = "https://t.me/ivandp93"
+
+PUBLIC_BOT_REPLY_LINK = "https://t.me/+1hKD3O8rj8ZiOTQx"
 
 VALID_REF_CODES_TEXT = (
     "71790605\n"
@@ -134,6 +140,21 @@ def format_optional_usdt(value):
     if value is None or value == "":
         return "No disponible"
     return f"{money(value)} USDT"
+
+
+def contains_bot_keyword(text: str) -> bool:
+    """
+    Detecta la palabra bot o bots como palabra independiente.
+    Ejemplos válidos:
+    - bot
+    - bots
+    - quiero un bot
+    - info de bots
+    """
+    if not text:
+        return False
+
+    return re.search(r"\b(bot|bots)\b", text.lower()) is not None
 
 
 # ─────────────────────────────
@@ -1052,6 +1073,14 @@ def group_welcome_text(user):
     )
 
 
+def public_bot_reply_text():
+    return (
+        "Hola, ¿cómo estás? Para seguir los Bots y los copy tradings, sigue las instrucciones del siguiente link.\n\n"
+        "Si el chat no inicia automáticamente, escribe Hola.\n\n"
+        f"{PUBLIC_BOT_REPLY_LINK}"
+    )
+
+
 async def send_welcome(context, user):
     await context.bot.send_message(
         chat_id=VIP_CHAT_ID,
@@ -1215,6 +1244,29 @@ async def track_new_group_members(update: Update, context: ContextTypes.DEFAULT_
             status="pending",
             source="joined_group"
         )
+
+
+async def public_bot_keyword_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Responde automáticamente en el grupo público cuando alguien escribe la palabra:
+    bot o bots.
+    """
+    if not update.message or not update.message.text:
+        return
+
+    if update.effective_chat.id != PUBLIC_CHAT_ID:
+        return
+
+    user = update.message.from_user
+    if user and user.is_bot:
+        return
+
+    text = update.message.text.strip()
+
+    if not contains_bot_keyword(text):
+        return
+
+    await update.message.reply_text(public_bot_reply_text())
 
 
 async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2089,9 +2141,15 @@ def main():
     app.add_handler(CommandHandler("debuguid", debuguid))
     app.add_handler(CommandHandler("informe", informe))
 
-    # Grupo / acceso
+    # Grupo / acceso VIP
     app.add_handler(ChatJoinRequestHandler(on_join_request))
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, track_new_group_members))
+
+    # Grupo público: responder automáticamente cuando alguien escriba "bot" o "bots"
+    app.add_handler(MessageHandler(
+        filters.Chat(chat_id=PUBLIC_CHAT_ID) & filters.TEXT & ~filters.COMMAND,
+        public_bot_keyword_reply
+    ))
 
     # Privado: recepción UID
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, handle_private))
@@ -2112,6 +2170,7 @@ def main():
 
     print(f"🤖 BOT {GROUP_NAME} iniciado.")
     print(f"📁 DB_PATH: {DB_PATH}")
+    print(f"📣 Grupo público configurado: {PUBLIC_CHAT_ID}")
 
     app.run_polling()
 
