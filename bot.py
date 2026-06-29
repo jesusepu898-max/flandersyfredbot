@@ -40,6 +40,7 @@ from telegram.ext import (
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 VIP_CHAT_ID = int(os.environ["VIP_CHAT_ID"])
 
+# Grupo público donde el bot responderá cuando alguien escriba "bot" o "bots"
 PUBLIC_CHAT_ID = int(os.environ.get("PUBLIC_CHAT_ID", "-1003133540062"))
 
 OKX_API_KEY = os.environ["OKX_API_KEY"]
@@ -53,6 +54,8 @@ ADMIN_IDS = [
     if x.strip().isdigit()
 ]
 
+# En Render usar:
+# DB_PATH=/var/data/flanders_fred_bot.db
 DB_PATH = os.environ.get("DB_PATH", "/var/data/flanders_fred_bot.db")
 
 TZ_AR = ZoneInfo("America/Argentina/Buenos_Aires")
@@ -63,6 +66,7 @@ INSTRUMENTS_CACHE = {}
 OKX_JOIN_LINK = "https://www.okx.com/join/FLANDERSYFRED"
 REBIND_FORM_LINK = "https://www.okx.com/ul/J6l2R5"
 FLANDERS_PRIVATE_LINK = "https://t.me/ivandp93"
+
 PUBLIC_BOT_REPLY_LINK = "https://t.me/+1hKD3O8rj8ZiOTQx"
 
 VALID_REF_CODES_TEXT = (
@@ -74,6 +78,22 @@ VALID_REF_CODES_TEXT = (
 
 
 def get_affiliate_accounts():
+    """
+    Carga todas las cuentas de afiliado configuradas.
+
+    Cuenta principal:
+    OKX_API_KEY
+    OKX_API_SECRET
+    OKX_API_PASSPHRASE
+
+    Cuentas adicionales en Render:
+    OKX_API_KEY_KOL2
+    OKX_API_SECRET_KOL2
+    OKX_API_PASSPHRASE_KOL2
+    KOL2_NAME opcional
+
+    Puedes sumar hasta KOL10 usando el mismo formato.
+    """
     accounts = []
 
     accounts.append({
@@ -98,7 +118,6 @@ def get_affiliate_accounts():
             })
 
     return accounts
-
 
 # -----------------------------
 # UTILS
@@ -167,6 +186,14 @@ def format_optional_usdt(value):
 
 
 def contains_bot_keyword(text: str) -> bool:
+    """
+    Detecta la palabra bot o bots como palabra independiente.
+    Ejemplos válidos:
+    - bot
+    - bots
+    - quiero un bot
+    - info de bots
+    """
     if not text:
         return False
 
@@ -234,7 +261,7 @@ def init_db():
     conn.commit()
     conn.close()
 
-    print(f"DB inicializada en: {DB_PATH}")
+    print(f"✅ DB inicializada en: {DB_PATH}")
 
 
 def save_user_state(
@@ -385,7 +412,7 @@ def save_user(telegram_id, uid, first_name=None, username=None, last_vol_month=0
     conn.commit()
     conn.close()
 
-    print(f"Usuario guardado: TG={telegram_id} UID={uid} VOL={last_vol_month}")
+    print(f"✅ Usuario guardado: TG={telegram_id} UID={uid} VOL={last_vol_month}")
 
 
 def update_user_volume_by_uid(uid, volume):
@@ -534,6 +561,10 @@ def okx_affiliate_detail(uid, account=None):
 
 
 def find_uid_in_affiliates(uid):
+    """
+    Consulta el UID en todas las cuentas afiliadas configuradas.
+    Si aparece en cualquiera, retorna validado.
+    """
     accounts = get_affiliate_accounts()
     errors = []
 
@@ -566,7 +597,7 @@ def find_uid_in_affiliates(uid):
             time.sleep(0.25)
 
         except Exception as e:
-            print(f"Error consultando UID={uid} en {account['name']}: {e}")
+            print(f"⚠️ Error consultando UID={uid} en {account['name']}: {e}")
             errors.append({
                 "account_name": account["name"],
                 "error": str(e),
@@ -783,3 +814,1512 @@ def estimate_fill_volume_usdt(fill):
         return fill_sz * ct_val
 
     return fill_sz * ct_val * fill_px
+
+
+def parse_period_to_days(args):
+    if not args:
+        return 7
+
+    raw = args[0].lower().strip()
+    raw = raw.replace("d", "")
+    raw = raw.replace("dias", "")
+    raw = raw.replace("días", "")
+    raw = raw.replace("dia", "")
+    raw = raw.replace("día", "")
+
+    try:
+        days = int(raw)
+    except Exception:
+        return None
+
+    if days <= 0:
+        return None
+
+    if days > 90:
+        days = 90
+
+    return days
+
+
+def get_master_trading_volume(days=7):
+    end_dt = datetime.now(timezone.utc)
+    begin_dt = end_dt - timedelta(days=days)
+
+    begin_ms = int(begin_dt.timestamp() * 1000)
+    end_ms = int(end_dt.timestamp() * 1000)
+
+    inst_types = ["SPOT", "MARGIN", "SWAP", "FUTURES", "OPTION"]
+
+    total_volume = 0.0
+    total_fills = 0
+
+    by_type = {
+        "SPOT": 0.0,
+        "MARGIN": 0.0,
+        "SWAP": 0.0,
+        "FUTURES": 0.0,
+        "OPTION": 0.0
+    }
+
+    errors = []
+
+    for inst_type in inst_types:
+        after = None
+        pages = 0
+
+        while True:
+            pages += 1
+
+            if pages > 20:
+                break
+
+            try:
+                resp = okx_trade_fills_history(
+                    inst_type=inst_type,
+                    begin_ms=begin_ms,
+                    end_ms=end_ms,
+                    after=after,
+                    limit=100
+                )
+            except Exception as e:
+                errors.append(f"{inst_type}: {e}")
+                break
+
+            if resp.get("code") != "0":
+                errors.append(f"{inst_type}: code={resp.get('code')} msg={resp.get('msg')}")
+                break
+
+            data = resp.get("data") or []
+
+            if not data:
+                break
+
+            for fill in data:
+                vol = estimate_fill_volume_usdt(fill)
+                total_volume += vol
+                by_type[inst_type] += vol
+                total_fills += 1
+
+            last_bill_id = data[-1].get("billId")
+
+            if not last_bill_id:
+                break
+
+            after = last_bill_id
+
+            time.sleep(0.15)
+
+            if len(data) < 100:
+                break
+
+    return {
+        "days": days,
+        "begin": begin_dt.astimezone(TZ_AR).strftime("%Y-%m-%d %H:%M:%S"),
+        "end": end_dt.astimezone(TZ_AR).strftime("%Y-%m-%d %H:%M:%S"),
+        "total_volume": total_volume,
+        "total_fills": total_fills,
+        "by_type": by_type,
+        "errors": errors
+    }
+
+
+def format_master_volume_report(report):
+    errors_text = ""
+
+    if report["errors"]:
+        errors_text = "\n\n⚠️ Alertas:\n" + "\n".join(report["errors"][:5])
+
+    return (
+        f"📊 Volumen propio cuenta maestra OKX\n\n"
+        f"Periodo: últimos {report['days']} días\n"
+        f"Desde: {report['begin']} AR\n"
+        f"Hasta: {report['end']} AR\n\n"
+        f"Total estimado: {money(report['total_volume'])} USDT\n"
+        f"Fills encontrados: {report['total_fills']}\n\n"
+        f"Detalle por mercado:\n"
+        f"SPOT: {money(report['by_type'].get('SPOT'))} USDT\n"
+        f"MARGIN: {money(report['by_type'].get('MARGIN'))} USDT\n"
+        f"SWAP: {money(report['by_type'].get('SWAP'))} USDT\n"
+        f"FUTURES: {money(report['by_type'].get('FUTURES'))} USDT\n"
+        f"OPTION: {money(report['by_type'].get('OPTION'))} USDT\n\n"
+        f"Este cálculo usa únicamente trades/fills propios de la cuenta API.\n"
+        f"No incluye volumen de referidos."
+        f"{errors_text}"
+    )
+
+
+# -----------------------------
+# FORMATOS DE REPORTE ADMIN
+# -----------------------------
+def format_uid_report(report):
+    if report is None:
+        return "❌ UID no encontrado en la comunidad de afiliados OKX."
+
+    first_trade = "Sí" if report["did_first_trade"] else "No"
+    community = "Sí" if report["is_local_community"] else "No registrado en DB local"
+    affiliate = "Sí" if report["is_affiliate"] else "No"
+
+    username = report.get("username") or ""
+    if username:
+        username = f"@{username}"
+
+    return (
+        f"📊 Reporte UID: {report['uid']}\n\n"
+        f"✅ Parte del afiliado OKX: {affiliate}\n"
+        f"🤝 Comunidad / KOL detectado: {report.get('affiliate_account_name') or 'No disponible'}\n"
+        f"👥 Registrado en DB comunidad: {community}\n"
+        f"📅 Fecha registro / join: {report.get('register_time') or 'No disponible'}\n"
+        f"📅 Fecha KYC: {report.get('kyc_time') or 'No disponible'}\n"
+        f"🌎 Región: {report.get('region') or 'No disponible'}\n"
+        f"🏷️ Código afiliado: {report.get('affiliate_code') or 'No disponible'}\n"
+        f"⭐ Nivel invitee: {report.get('invitee_level') or 'No disponible'}\n\n"
+        f"💰 Depósito acumulado: {money(report.get('dep_amt'))} USDT\n"
+        f"💰 Depósito últimos 15 días: {format_optional_usdt(report.get('dep_15d'))}\n"
+        f"📈 Volumen mensual: {money(report.get('vol_month'))} USDT\n"
+        f"📈 Volumen últimos 7 días: {format_optional_usdt(report.get('vol_7d'))}\n"
+        f"📈 Volumen total histórico: {money(report.get('total_vol'))} USDT\n"
+        f"🏦 Retiros acumulados: {money(report.get('wd_amt'))} USDT\n\n"
+        f"🎯 Primer trade: {first_trade}\n"
+        f"🕒 Fecha primer trade: {report.get('first_trade_time') or 'No disponible'}\n\n"
+        f"Telegram: {report.get('first_name') or '-'} {username}"
+    )
+
+
+def format_uid_report_line(report, uid):
+    if report is None:
+        return f"❌ {uid} | No afiliado / no encontrado"
+
+    first_trade = "Sí" if report["did_first_trade"] else "No"
+    community = "Sí" if report["is_local_community"] else "No DB"
+
+    dep_15d = report.get("dep_15d")
+    vol_7d = report.get("vol_7d")
+
+    dep_15d_txt = number(dep_15d) if dep_15d is not None else "N/D"
+    vol_7d_txt = number(vol_7d) if vol_7d is not None else "N/D"
+
+    return (
+        f"✅ {uid} | "
+        f"Comunidad: {community} | "
+        f"Dep total: {number(report.get('dep_amt'))} | "
+        f"Dep 15d: {dep_15d_txt} | "
+        f"Vol mes: {number(report.get('vol_month'))} | "
+        f"Vol 7d: {vol_7d_txt} | "
+        f"Vol total: {number(report.get('total_vol'))} | "
+        f"1er trade: {first_trade}"
+    )
+
+
+# -----------------------------
+# MENSAJES DEL FLUJO
+# -----------------------------
+def start_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🆕 Soy nuevo", callback_data="flow_new")],
+        [InlineKeyboardButton("👤 Ya tengo cuenta OKX", callback_data="flow_existing")],
+        [InlineKeyboardButton("🔄 Ya estoy en VIP y debo actualizar referido", callback_data="flow_update")],
+    ])
+
+
+def action_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✍️ Enviar mi UID de OKX", callback_data="ask_uid")],
+        [InlineKeyboardButton("🔙 Ver menú principal", callback_data="show_menu")],
+    ])
+
+
+def back_to_menu_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔙 Ver menú principal", callback_data="show_menu")],
+    ])
+
+
+def uid_prompt_text():
+    return (
+        "✍️ Perfecto.\n\n"
+        "Ahora envíame tu UID de OKX usando solo números.\n\n"
+        "Ejemplo:\n"
+        "123456789"
+    )
+
+
+def welcome_menu_text():
+    return (
+        f"👋 Hola, soy el asistente oficial de {GROUP_NAME}.\n\n"
+        "Te voy a guiar para acceder o mantener tu acceso a los bots y copy trading de la comunidad.\n\n"
+        "Elige una opción para continuar:"
+    )
+
+
+def terms_text():
+    return (
+        "📌 Términos y condiciones importantes\n\n"
+        "✅ La inversión mínima depende del bot que elijas, pero ronda en 25 USDT. "
+        "Actualmente hay bots sobre diferentes activos como XAU, ETH, BTC, TSLA, QQQ, XAG, XRP, SPY, petróleo, "
+        "acciones tecnológicas y otros instrumentos disponibles.\n\n"
+        "✅ Existen algunos bots exclusivos con mínimos de inversión mayores a 1000 USDT. "
+        "Más información en el grupo VIP.\n\n"
+        "✅ La inversión mínima para copy trading depende de cada trader o estrategia. "
+        "En general, puede comenzar desde aproximadamente 100 USDT.\n\n"
+        "✅ El servicio de bots y copy trading es gratuito. Los bots no están a la venta y no hay membresías. "
+        "Funcionan únicamente en OKX. No operan en brokers externos ni en MT5.\n\n"
+        "✅ Tú tienes el control total de tu cuenta de OKX. Puedes seguir o dejar de seguir un bot o copy trading "
+        "cuando lo decidas. Puedes depositar más o retirar tu capital cuando quieras.\n\n"
+        "❌ No garantizamos rendimientos fijos ni seguros.\n\n"
+        "❌ Los bots no funcionan como un CDT, depósito a plazo o producto de renta fija.\n\n"
+        "❌ No somos asesores financieros. Cada usuario debe evaluar por su cuenta qué bot, copy trading "
+        "o estrategia desea seguir.\n\n"
+        "❌ No captamos dinero del público ni gestionamos recursos de terceros.\n\n"
+        "❌ No somos una entidad financiera, casa de valores, sociedad comisionista de bolsa "
+        "ni administradores de portafolios."
+    )
+
+
+def new_user_text():
+    return (
+        "🚀 Para NUEVOS usuarios\n\n"
+        "1️⃣ Crea tu cuenta en OKX con el link oficial:\n\n"
+        f"{OKX_JOIN_LINK}\n\n"
+        "2️⃣ Completa tu registro y verificación KYC.\n\n"
+        "3️⃣ Solicita acceso al grupo VIP.\n\n"
+        "4️⃣ Cuando el bot te escriba, envía tu UID de OKX por este chat.\n\n"
+        "5️⃣ Si tu UID está correctamente vinculado, el bot aprobará tu acceso automáticamente al grupo VIP.\n\n"
+        "Dentro del grupo VIP encontrarás:\n\n"
+        "🤖 Links de bots disponibles\n"
+        "📈 Copy trading\n"
+        "🎁 Bonos y beneficios especiales\n"
+        "📚 Información y soporte para operar en OKX\n\n"
+        "🚀 Así de simple: crea tu cuenta, solicita acceso, valida tu UID y entra a la comunidad VIP para comenzar a participar."
+    )
+
+
+def existing_user_text():
+    return (
+        "👤 Si ya tienes cuenta en OKX\n\n"
+        "Debes comprobar que tu cuenta esté vinculada a alguno de estos códigos/referidos:\n\n"
+        f"{VALID_REF_CODES_TEXT}\n\n"
+        "✅ ¿Cómo saber si estás vinculado correctamente?\n\n"
+        "Envíame tu UID de OKX por este chat.\n\n"
+        "Si el sistema valida tu UID, el bot podrá aprobar tu acceso al grupo VIP.\n\n"
+        "Si no puedes avanzar, significa que tu cuenta no está vinculada correctamente al referido.\n\n"
+        "Si ya tienes cuenta, pero no estás vinculado al código de referido, completa el siguiente formulario:\n\n"
+        f"{REBIND_FORM_LINK}\n\n"
+        "En el campo de código de invitación, ingresa:\n\n"
+        "FLANDERSYFRED\n"
+        "o el código:\n"
+        "99142589\n\n"
+        "En motivo, escribe:\n\n"
+        "Quiero pertenecer a la comunidad de FLANDERS Y FRED\n\n"
+        "Si te aparece un mensaje indicando que por el momento no puedes continuar, escribe al privado de Flanders "
+        "y envía tu UID para revisar tu caso:\n\n"
+        f"{FLANDERS_PRIVATE_LINK}"
+    )
+
+
+def update_ref_text():
+    return (
+        "🔄 Actualización de referido para usuarios que ya están en el grupo VIP\n\n"
+        "Debes comprobar que tu cuenta esté vinculada a alguno de estos códigos/referidos. "
+        "De lo contrario, podrás ser removido del grupo el día 10 de julio y perderás el acceso "
+        "a los nuevos bots y copy trading exclusivos.\n\n"
+        f"{VALID_REF_CODES_TEXT}\n\n"
+        "✅ ¿Cómo saber si estás vinculado correctamente?\n\n"
+        "Envíame tu UID de OKX por este chat.\n\n"
+        "Si el sistema valida tu UID, podrás seguir en el grupo VIP.\n\n"
+        "Si no puedes avanzar, significa que tu cuenta no está vinculada correctamente al referido.\n\n"
+        "Para cambiar el código de referido, completa el siguiente formulario:\n\n"
+        f"{REBIND_FORM_LINK}\n\n"
+        "En el campo de código de invitación, ingresa:\n\n"
+        "FLANDERSYFRED\n"
+        "o el código:\n"
+        "99142589\n\n"
+        "En motivo, escribe:\n\n"
+        "Quiero pertenecer a la comunidad de FLANDERS Y FRED\n\n"
+        "Si te aparece un mensaje indicando que por el momento no puedes continuar, escribe al privado de Flanders "
+        "y envía tu UID para revisar tu caso:\n\n"
+        f"{FLANDERS_PRIVATE_LINK}"
+    )
+
+
+def not_affiliated_existing_text():
+    return (
+        "❌ Tu UID no aparece vinculado a la comunidad de Flanders y Fred.\n\n"
+        "Debes comprobar que tu cuenta esté vinculada a alguno de estos códigos/referidos:\n\n"
+        f"{VALID_REF_CODES_TEXT}\n\n"
+        "Si ya tienes cuenta, pero no estás vinculado al código de referido, completa el siguiente formulario:\n\n"
+        f"{REBIND_FORM_LINK}\n\n"
+        "En el campo de código de invitación, ingresa:\n\n"
+        "FLANDERSYFRED\n"
+        "o el código:\n"
+        "99142589\n\n"
+        "En motivo, escribe:\n\n"
+        "Quiero pertenecer a la comunidad de FLANDERS Y FRED\n\n"
+        "Si te aparece un mensaje indicando que por el momento no puedes continuar, escribe al privado de Flanders "
+        "y envía tu UID para revisar tu caso:\n\n"
+        f"{FLANDERS_PRIVATE_LINK}"
+    )
+
+
+def not_affiliated_update_text():
+    return (
+        "⚠️ Tu UID no aparece vinculado a la comunidad de Flanders y Fred.\n\n"
+        "Tienes hasta el 10 de julio para mantener tus accesos a los nuevos bots y copy trading exclusivos.\n\n"
+        "Debes comprobar que tu cuenta esté vinculada a alguno de estos códigos/referidos:\n\n"
+        f"{VALID_REF_CODES_TEXT}\n\n"
+        "Para cambiar el código de referido, completa el siguiente formulario:\n\n"
+        f"{REBIND_FORM_LINK}\n\n"
+        "En el campo de código de invitación, ingresa:\n\n"
+        "FLANDERSYFRED\n"
+        "o el código:\n"
+        "99142589\n\n"
+        "En motivo, escribe:\n\n"
+        "Quiero pertenecer a la comunidad de FLANDERS Y FRED\n\n"
+        "Si te aparece un mensaje indicando que por el momento no puedes continuar, escribe al privado de Flanders "
+        "y envía tu UID para revisar tu caso:\n\n"
+        f"{FLANDERS_PRIVATE_LINK}"
+    )
+
+
+def validated_text(flow):
+    if flow == "update":
+        return (
+            "✅ UID verificado correctamente.\n\n"
+            "Gracias por actualizar tu información. Tu cuenta aparece vinculada a la comunidad de Flanders y Fred.\n\n"
+            "Puedes acceder de forma permanente a los bots y copy trading de Flanders y Fred mientras mantengas "
+            "las condiciones de la comunidad."
+        )
+
+    return (
+        "✅ UID verificado correctamente.\n\n"
+        "Tu cuenta aparece vinculada a la comunidad de Flanders y Fred.\n\n"
+        "Si ya solicitaste acceso al grupo VIP, tu solicitud será aprobada automáticamente.\n\n"
+        "Dentro del grupo VIP encontrarás links de bots, copy trading, bonos, beneficios e información para operar en OKX."
+    )
+
+
+def group_welcome_text(user):
+    return (
+        f"🚀👋 Bienvenido {mention_html(user.id, user.first_name)} al grupo {GROUP_NAME}.\n\n"
+        "Aquí encontrarás bots exclusivos, copy trading, tips de trading y beneficios por pertenecer a nuestra comunidad.\n\n"
+        f"{terms_text()}\n\n"
+        "¡Saludos y buenos trades! 📈"
+    )
+
+
+def public_bot_reply_text():
+    return (
+        "Hola, ¿cómo estás? Para seguir los Bots y los copy tradings, sigue las instrucciones del siguiente link.\n\n"
+        "Si el chat no inicia automáticamente, escribe Hola.\n\n"
+        f"{PUBLIC_BOT_REPLY_LINK}"
+    )
+
+
+async def send_welcome(context, user):
+    await context.bot.send_message(
+        chat_id=VIP_CHAT_ID,
+        text=group_welcome_text(user),
+        parse_mode=ParseMode.HTML
+    )
+
+
+async def approve_user_if_possible(context: ContextTypes.DEFAULT_TYPE, user):
+    try:
+        await context.bot.approve_chat_join_request(VIP_CHAT_ID, user.id)
+        print(f"✅ Solicitud aprobada TG={user.id}")
+        return True
+    except TelegramError as e:
+        print(f"⚠️ No se pudo aprobar solicitud TG={user.id}: {e}")
+        return False
+    except Exception as e:
+        print(f"⚠️ Error aprobando solicitud TG={user.id}: {e}")
+        return False
+
+
+# -----------------------------
+# TELEGRAM HANDLERS
+# -----------------------------
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.message.from_user
+
+    save_user_state(
+        telegram_id=user.id,
+        first_name=user.first_name,
+        username=user.username,
+        status="pending",
+        source="start"
+    )
+
+    await update.message.reply_text(
+        welcome_menu_text(),
+        reply_markup=start_keyboard()
+    )
+
+
+async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await start(update, context)
+
+
+async def flow_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    user = query.from_user
+    data = query.data
+
+    if data == "show_menu":
+        await query.edit_message_text(
+            text=welcome_menu_text(),
+            reply_markup=start_keyboard()
+        )
+        return
+
+    if data == "ask_uid":
+        await query.edit_message_text(
+            text=uid_prompt_text(),
+            reply_markup=back_to_menu_keyboard()
+        )
+        return
+
+    if data == "flow_new":
+        flow = "new"
+        text = new_user_text()
+    elif data == "flow_existing":
+        flow = "existing"
+        text = existing_user_text()
+    elif data == "flow_update":
+        flow = "update"
+        text = update_ref_text()
+    else:
+        flow = ""
+        text = welcome_menu_text()
+
+    context.user_data["flow"] = flow
+
+    save_user_state(
+        telegram_id=user.id,
+        first_name=user.first_name,
+        username=user.username,
+        flow=flow,
+        status="pending",
+        source="button"
+    )
+
+    await query.edit_message_text(
+        text=text,
+        reply_markup=action_keyboard()
+    )
+
+
+async def on_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.chat_join_request.from_user
+
+    row_validated = get_user_by_telegram_id(user.id)
+    row_state = get_user_state(user.id)
+
+    if row_validated or (row_state and row_state["status"] == "validated"):
+        await approve_user_if_possible(context, user)
+
+        try:
+            await send_welcome(context, user)
+        except Exception as e:
+            print(f"⚠️ No se pudo enviar bienvenida al grupo: {e}")
+
+        try:
+            await context.bot.send_message(
+                chat_id=user.id,
+                text=(
+                    "✅ Acceso aprobado.\n\n"
+                    "Tu UID ya estaba verificado correctamente. "
+                    "Bienvenido a la comunidad VIP de Flanders y Fred."
+                )
+            )
+        except Exception as e:
+            print(f"⚠️ No se pudo enviar DM al usuario validado {user.id}: {e}")
+
+        return
+
+    save_user_state(
+        telegram_id=user.id,
+        first_name=user.first_name,
+        username=user.username,
+        status="pending",
+        source="join_request"
+    )
+
+    try:
+        await context.bot.send_message(
+            chat_id=user.id,
+            text=(
+                f"📌 Bienvenido al grupo {GROUP_NAME}.\n\n"
+                "Para validar tu acceso, primero elige una opción:"
+            ),
+            reply_markup=start_keyboard()
+        )
+    except Exception as e:
+        print(f"⚠️ No se pudo enviar DM al usuario {user.id}: {e}")
+
+
+async def track_new_group_members(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.id != VIP_CHAT_ID:
+        return
+
+    if not update.message or not update.message.new_chat_members:
+        return
+
+    for member in update.message.new_chat_members:
+        if member.is_bot:
+            continue
+
+        save_user_state(
+            telegram_id=member.id,
+            first_name=member.first_name,
+            username=member.username,
+            status="pending",
+            source="joined_group"
+        )
+
+
+async def public_bot_keyword_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Responde automáticamente en el grupo público cuando alguien escribe la palabra:
+    bot o bots.
+    """
+    if not update.message or not update.message.text:
+        return
+
+    if update.effective_chat.id != PUBLIC_CHAT_ID:
+        return
+
+    user = update.message.from_user
+    if user and user.is_bot:
+        return
+
+    text = update.message.text.strip()
+
+    if not contains_bot_keyword(text):
+        return
+
+    await update.message.reply_text(public_bot_reply_text())
+
+
+async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.message.from_user
+    text = update.message.text.strip()
+
+    row_state = get_user_state(user.id)
+    flow = context.user_data.get("flow")
+
+    if not flow and row_state:
+        flow = row_state["flow"] or ""
+
+    if text == BYPASS_CODE:
+        save_user(
+            telegram_id=user.id,
+            uid="BYPASS",
+            first_name=user.first_name,
+            username=user.username,
+            last_vol_month=0
+        )
+
+        save_user_state(
+            telegram_id=user.id,
+            uid="BYPASS",
+            first_name=user.first_name,
+            username=user.username,
+            flow=flow or "bypass",
+            status="validated",
+            source="bypass"
+        )
+
+        approved = await approve_user_if_possible(context, user)
+
+        await context.bot.send_message(
+            chat_id=user.id,
+            text="✔️ Código interno verificado. Acceso aprobado."
+        )
+
+        if approved:
+            try:
+                await send_welcome(context, user)
+            except Exception as e:
+                print(f"⚠️ No se pudo enviar bienvenida al grupo: {e}")
+
+        return
+
+    if not text.isnumeric():
+        await update.message.reply_text(
+            "Para continuar, elige una opción o envíame tu UID de OKX usando solo números.",
+            reply_markup=action_keyboard()
+        )
+        return
+
+    uid = text
+
+    if not flow:
+        flow = "existing"
+        context.user_data["flow"] = flow
+
+        save_user_state(
+            telegram_id=user.id,
+            first_name=user.first_name,
+            username=user.username,
+            flow=flow,
+            status="pending",
+            source="uid_without_flow"
+        )
+
+    try:
+        is_affiliated, data, vol_month, raw_resp = is_uid_affiliated(uid)
+    except Exception as e:
+        print(f"❌ Error consultando OKX UID={uid}: {e}")
+        await update.message.reply_text(
+            "❌ Hubo un error consultando OKX.\n"
+            "Intenta nuevamente más tarde o escribe al privado de Flanders para revisar tu caso:\n\n"
+            f"{FLANDERS_PRIVATE_LINK}",
+            reply_markup=action_keyboard()
+        )
+        return
+
+    if not is_affiliated:
+        save_user_state(
+            telegram_id=user.id,
+            uid=uid,
+            first_name=user.first_name,
+            username=user.username,
+            flow=flow,
+            status="not_affiliated",
+            source="uid_not_affiliated"
+        )
+
+        if flow == "update":
+            await update.message.reply_text(
+                not_affiliated_update_text(),
+                reply_markup=action_keyboard()
+            )
+        else:
+            await update.message.reply_text(
+                not_affiliated_existing_text(),
+                reply_markup=action_keyboard()
+            )
+
+        return
+
+    save_user(
+        telegram_id=user.id,
+        uid=uid,
+        first_name=user.first_name,
+        username=user.username,
+        last_vol_month=vol_month
+    )
+
+    save_user_state(
+        telegram_id=user.id,
+        uid=uid,
+        first_name=user.first_name,
+        username=user.username,
+        flow=flow,
+        status="validated",
+        source="uid_validated"
+    )
+
+    approved = await approve_user_if_possible(context, user)
+
+    kol_detected = ""
+    if isinstance(raw_resp, dict):
+        kol_detected = raw_resp.get("account_name", "")
+
+    validation_msg = validated_text(flow)
+
+    if kol_detected:
+        validation_msg += f"\n\n🤝 Comunidad detectada: {kol_detected}"
+
+    await context.bot.send_message(
+        chat_id=user.id,
+        text=validation_msg,
+        reply_markup=back_to_menu_keyboard()
+    )
+
+    if approved:
+        try:
+            await send_welcome(context, user)
+        except Exception as e:
+            print(f"⚠️ No se pudo enviar bienvenida al grupo: {e}")
+
+
+# -----------------------------
+# ADMIN: VOLUMEN PROPIO CUENTA MAESTRA
+# -----------------------------
+async def mivolumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type != "private":
+        await update.message.reply_text(
+            "Por seguridad, usa este comando en el chat privado con el bot."
+        )
+        return
+
+    admin_id = update.message.from_user.id
+
+    if not is_admin(admin_id):
+        await update.message.reply_text("❌ No autorizado.")
+        return
+
+    days = parse_period_to_days(context.args)
+
+    if days is None:
+        await update.message.reply_text(
+            "Uso:\n"
+            "/mivolumen\n"
+            "/mivolumen 7d\n"
+            "/mivolumen 15d\n"
+            "/mivolumen 30d\n\n"
+            "Máximo permitido: 90d."
+        )
+        return
+
+    await update.message.reply_text(
+        f"⏳ Consultando volumen propio de la cuenta maestra para los últimos {days} días..."
+    )
+
+    try:
+        report = get_master_trading_volume(days=days)
+        await update.message.reply_text(format_master_volume_report(report))
+    except Exception as e:
+        print(f"Error en /mivolumen: {e}")
+        await update.message.reply_text(
+            "❌ Error consultando el volumen propio de la cuenta maestra.\n"
+            "Verifica que la API key tenga permiso Read para trading/account."
+        )
+
+
+# -----------------------------
+# ADMIN COMMANDS FLANDERS Y FRED
+# -----------------------------
+async def lista(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type != "private":
+        await update.message.reply_text("Por seguridad, usa este comando por privado.")
+        return
+
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ No autorizado.")
+        return
+
+    users = get_all_users()
+
+    if not users:
+        await update.message.reply_text("No hay usuarios registrados todavía.")
+        return
+
+    texto = "📋 LISTA DE USUARIOS VIP FLANDERS Y FRED\n\n"
+
+    for u in users:
+        username = u["username"] or ""
+        if username:
+            username = f"@{username}"
+        texto += f"UID: {u['uid']} | TG: {u['telegram_id']} | {u['first_name'] or ''} {username}\n"
+
+    if len(texto) <= 3900:
+        await update.message.reply_text(texto)
+    else:
+        filename = f"lista_flanders_fred_{datetime.now(TZ_AR).strftime('%Y_%m_%d_%H_%M')}.txt"
+        filepath = os.path.join(tempfile.gettempdir(), filename)
+
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(texto)
+
+        await context.bot.send_document(
+            chat_id=update.message.from_user.id,
+            document=open(filepath, "rb"),
+            filename=filename,
+            caption="📋 Lista de usuarios VIP Flanders y Fred"
+        )
+
+
+async def listauids(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type != "private":
+        await update.message.reply_text("Por seguridad, usa /listauids por privado.")
+        return
+
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ No autorizado.")
+        return
+
+    users = get_all_user_states()
+    counts = get_user_state_counts()
+
+    if not users:
+        await update.message.reply_text("Todavía no hay usuarios registrados en la base de datos del bot.")
+        return
+
+    lines = []
+    lines.append("📋 LISTA DE USUARIOS QUE INTERACTUARON CON EL BOT\n")
+    lines.append(f"Total registrados en DB: {counts['total'] or 0}")
+    lines.append(f"Con UID compartido: {counts['con_uid'] or 0}")
+    lines.append(f"Sin UID compartido: {counts['sin_uid'] or 0}")
+    lines.append(f"Validados: {counts['validados'] or 0}")
+    lines.append(f"No afiliados: {counts['no_afiliados'] or 0}")
+    lines.append(f"Pendientes: {counts['pendientes'] or 0}")
+    lines.append("")
+    lines.append("⚠️ Nota: Telegram no permite al bot descargar la lista histórica completa de miembros del grupo.")
+    lines.append("Esta lista incluye usuarios que abrieron el bot, solicitaron acceso o fueron registrados por eventos visibles para el bot.")
+    lines.append("")
+
+    lines.append("✅ USUARIOS CON UID")
+    has_uid = [u for u in users if u["uid"]]
+
+    if has_uid:
+        for u in has_uid[:200]:
+            username = f"@{u['username']}" if u["username"] else ""
+            lines.append(
+                f"- TG:{u['telegram_id']} | {u['first_name'] or '-'} {username} | UID:{u['uid']} | Estado:{u['status'] or '-'} | Flujo:{u['flow'] or '-'}"
+            )
+    else:
+        lines.append("- Ninguno")
+
+    lines.append("")
+    lines.append("⏳ USUARIOS SIN UID")
+    no_uid = [u for u in users if not u["uid"]]
+
+    if no_uid:
+        for u in no_uid[:200]:
+            username = f"@{u['username']}" if u["username"] else ""
+            lines.append(
+                f"- TG:{u['telegram_id']} | {u['first_name'] or '-'} {username} | Estado:{u['status'] or '-'} | Flujo:{u['flow'] or '-'} | Fuente:{u['source'] or '-'}"
+            )
+    else:
+        lines.append("- Ninguno")
+
+    text = "\n".join(lines)
+
+    if len(text) <= 3900:
+        await update.message.reply_text(text)
+    else:
+        filename = f"lista_uids_flanders_fred_{datetime.now(TZ_AR).strftime('%Y_%m_%d_%H_%M')}.txt"
+        filepath = os.path.join(tempfile.gettempdir(), filename)
+
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(text)
+
+        await context.bot.send_document(
+            chat_id=update.message.from_user.id,
+            document=open(filepath, "rb"),
+            filename=filename,
+            caption="📄 Lista de usuarios con UID y sin UID"
+        )
+
+
+async def sorteo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type != "private":
+        await update.message.reply_text("Por seguridad, usa este comando por privado.")
+        return
+
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ No autorizado.")
+        return
+
+    users = get_all_users()
+
+    if len(users) < 2:
+        await update.message.reply_text("No hay suficientes usuarios para sorteo.")
+        return
+
+    winners = random.sample(list(users), 2)
+
+    mensaje = "🎉 SORTEO VIP FLANDERS Y FRED 🎉\n\n"
+
+    for i, w in enumerate(winners, start=1):
+        mensaje += f"{i}️⃣ UID: {w['uid']} | TG: {w['telegram_id']}\n"
+
+    await update.message.reply_text(mensaje)
+
+
+async def top(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type != "private":
+        await update.message.reply_text("Por seguridad, usa este comando por privado.")
+        return
+
+    if not is_admin(update.message.from_user.id):
+        await update.message.reply_text("❌ No autorizado.")
+        return
+
+    ranking = []
+
+    await update.message.reply_text("⏳ Consultando TOP volumen del mes Flanders y Fred...")
+
+    for user in get_all_users():
+        try:
+            if user["uid"] == "BYPASS":
+                continue
+
+            vol = get_uid_volume(user["uid"])
+
+            if vol is not None:
+                ranking.append((user["uid"], vol))
+                update_user_volume_by_uid(user["uid"], vol)
+
+            time.sleep(0.4)
+
+        except Exception as e:
+            print(f"Error consultando top UID={user['uid']}: {e}")
+
+    ranking.sort(key=lambda x: x[1], reverse=True)
+
+    mensaje = "🏆 TOP VOLUMEN DEL MES FLANDERS Y FRED\n\n"
+
+    for i, r in enumerate(ranking[:10], start=1):
+        mensaje += f"{i}. UID {r[0]} — {r[1]:.0f} USDT\n"
+
+    await update.message.reply_text(mensaje)
+
+
+async def voluid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type != "private":
+        await update.message.reply_text(
+            "Por seguridad, usa este comando en el chat privado con el bot."
+        )
+        return
+
+    admin_id = update.message.from_user.id
+
+    if not is_admin(admin_id):
+        await update.message.reply_text("❌ No autorizado.")
+        return
+
+    if not context.args:
+        await update.message.reply_text("Uso: /voluid 123456789")
+        return
+
+    uid = context.args[0].strip()
+
+    if not uid.isnumeric():
+        await update.message.reply_text("UID inválido. Usa solo números.")
+        return
+
+    try:
+        vol_month = get_uid_volume(uid)
+
+        if vol_month is None:
+            await update.message.reply_text("❌ No pude consultar ese UID en OKX.")
+            return
+
+        update_user_volume_by_uid(uid, vol_month)
+
+        await update.message.reply_text(
+            "📊 Consulta admin por UID\n\n"
+            f"UID: {uid}\n"
+            f"Volumen acumulado del mes: {vol_month:.0f} USDT"
+        )
+
+    except Exception as e:
+        print(f"Error admin consultando UID={uid}: {e}")
+        await update.message.reply_text("❌ Error consultando el UID.")
+
+
+async def checkuid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type != "private":
+        await update.message.reply_text("Por seguridad, usa este comando por privado.")
+        return
+
+    admin_id = update.message.from_user.id
+
+    if not is_admin(admin_id):
+        await update.message.reply_text("❌ No autorizado.")
+        return
+
+    if not context.args:
+        await update.message.reply_text("Uso: /checkuid 123456789")
+        return
+
+    uid = context.args[0].strip()
+
+    if not uid.isnumeric():
+        await update.message.reply_text("UID inválido. Usa solo números.")
+        return
+
+    try:
+        report = get_uid_report(uid)
+        await update.message.reply_text(format_uid_report(report))
+    except Exception as e:
+        print(f"Error en /checkuid UID={uid}: {e}")
+        await update.message.reply_text("❌ Error consultando el UID.")
+
+
+async def checkuids(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type != "private":
+        await update.message.reply_text("Por seguridad, usa este comando por privado.")
+        return
+
+    admin_id = update.message.from_user.id
+
+    if not is_admin(admin_id):
+        await update.message.reply_text("❌ No autorizado.")
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "Uso:\n"
+            "/checkuids 123 456 789\n\n"
+            "También puedes separar por comas."
+        )
+        return
+
+    raw_text = " ".join(context.args)
+    uids = split_uids(raw_text)
+
+    if not uids:
+        await update.message.reply_text("No encontré UIDs válidos.")
+        return
+
+    if len(uids) > 20:
+        await update.message.reply_text(
+            "Por ahora consulta máximo 20 UIDs por mensaje para evitar rate limit de OKX."
+        )
+        return
+
+    lines = ["📊 Reporte múltiple de UIDs Flanders y Fred\n"]
+
+    for uid in uids:
+        try:
+            report = get_uid_report(uid)
+            lines.append(format_uid_report_line(report, uid))
+            time.sleep(0.4)
+        except Exception as e:
+            print(f"Error consultando UID={uid}: {e}")
+            lines.append(f"⚠️ {uid} | Error consultando")
+
+    text = "\n".join(lines)
+
+    if len(text) <= 3900:
+        await update.message.reply_text(text)
+    else:
+        filename = f"reporte_uids_flanders_fred_{datetime.now(TZ_AR).strftime('%Y_%m_%d_%H_%M')}.txt"
+        filepath = os.path.join(tempfile.gettempdir(), filename)
+
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(text)
+
+        await context.bot.send_document(
+            chat_id=admin_id,
+            document=open(filepath, "rb"),
+            filename=filename,
+            caption="📄 Reporte múltiple de UIDs Flanders y Fred"
+        )
+
+
+async def checkuidscsv(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type != "private":
+        await update.message.reply_text("Por seguridad, usa este comando por privado.")
+        return
+
+    admin_id = update.message.from_user.id
+
+    if not is_admin(admin_id):
+        await update.message.reply_text("❌ No autorizado.")
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "Uso:\n"
+            "/checkuidscsv 123 456 789\n\n"
+            "También puedes separar por comas."
+        )
+        return
+
+    raw_text = " ".join(context.args)
+    uids = split_uids(raw_text)
+
+    if not uids:
+        await update.message.reply_text("No encontré UIDs válidos.")
+        return
+
+    if len(uids) > 100:
+        await update.message.reply_text("Máximo 100 UIDs por CSV para evitar rate limits.")
+        return
+
+    rows = []
+
+    for uid in uids:
+        try:
+            report = get_uid_report(uid)
+
+            if report is None:
+                rows.append({
+                    "uid": uid,
+                    "afiliado_okx": "No",
+                    "comunidad_db": "No",
+                    "fecha_registro_join": "",
+                    "fecha_kyc": "",
+                    "region": "",
+                    "codigo_afiliado": "",
+                    "invitee_level": "",
+                    "deposito_total_usdt": 0,
+                    "deposito_15d_usdt": "",
+                    "volumen_mes_usdt": 0,
+                    "volumen_7d_usdt": "",
+                    "volumen_total_usdt": 0,
+                    "retiros_total_usdt": 0,
+                    "primer_trade": "No",
+                    "fecha_primer_trade": "",
+                    "telegram_id": "",
+                    "first_name": "",
+                    "username": "",
+                    "joined_at": "",
+                })
+            else:
+                rows.append({
+                    "uid": uid,
+                    "afiliado_okx": "Si",
+                    "comunidad_db": "Si" if report.get("is_local_community") else "No",
+                    "fecha_registro_join": report.get("register_time") or "",
+                    "fecha_kyc": report.get("kyc_time") or "",
+                    "region": report.get("region") or "",
+                    "codigo_afiliado": report.get("affiliate_code") or "",
+                    "invitee_level": report.get("invitee_level") or "",
+                    "deposito_total_usdt": report.get("dep_amt") or 0,
+                    "deposito_15d_usdt": report.get("dep_15d") if report.get("dep_15d") is not None else "",
+                    "volumen_mes_usdt": report.get("vol_month") or 0,
+                    "volumen_7d_usdt": report.get("vol_7d") if report.get("vol_7d") is not None else "",
+                    "volumen_total_usdt": report.get("total_vol") or 0,
+                    "retiros_total_usdt": report.get("wd_amt") or 0,
+                    "primer_trade": "Si" if report.get("did_first_trade") else "No",
+                    "fecha_primer_trade": report.get("first_trade_time") or "",
+                    "telegram_id": report.get("telegram_id") or "",
+                    "first_name": report.get("first_name") or "",
+                    "username": report.get("username") or "",
+                    "joined_at": report.get("joined_at") or "",
+                })
+
+            time.sleep(0.4)
+
+        except Exception as e:
+            print(f"Error CSV consultando UID={uid}: {e}")
+            rows.append({
+                "uid": uid,
+                "afiliado_okx": "Error",
+                "comunidad_db": "",
+                "fecha_registro_join": "",
+                "fecha_kyc": "",
+                "region": "",
+                "codigo_afiliado": "",
+                "invitee_level": "",
+                "deposito_total_usdt": "",
+                "deposito_15d_usdt": "",
+                "volumen_mes_usdt": "",
+                "volumen_7d_usdt": "",
+                "volumen_total_usdt": "",
+                "retiros_total_usdt": "",
+                "primer_trade": "",
+                "fecha_primer_trade": "",
+                "telegram_id": "",
+                "first_name": "",
+                "username": "",
+                "joined_at": "",
+            })
+
+    filename = f"reporte_uids_flanders_fred_{datetime.now(TZ_AR).strftime('%Y_%m_%d_%H_%M')}.csv"
+    filepath = os.path.join(tempfile.gettempdir(), filename)
+
+    fieldnames = [
+        "uid",
+        "afiliado_okx",
+        "comunidad_db",
+        "fecha_registro_join",
+        "fecha_kyc",
+        "region",
+        "codigo_afiliado",
+        "invitee_level",
+        "deposito_total_usdt",
+        "deposito_15d_usdt",
+        "volumen_mes_usdt",
+        "volumen_7d_usdt",
+        "volumen_total_usdt",
+        "retiros_total_usdt",
+        "primer_trade",
+        "fecha_primer_trade",
+        "telegram_id",
+        "first_name",
+        "username",
+        "joined_at",
+    ]
+
+    with open(filepath, mode="w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    await context.bot.send_document(
+        chat_id=admin_id,
+        document=open(filepath, "rb"),
+        filename=filename,
+        caption="📄 Reporte CSV de UIDs Flanders y Fred / OKX"
+    )
+
+
+async def debuguid(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type != "private":
+        await update.message.reply_text("Por seguridad, usa este comando por privado.")
+        return
+
+    admin_id = update.message.from_user.id
+
+    if not is_admin(admin_id):
+        await update.message.reply_text("❌ No autorizado.")
+        return
+
+    if not context.args:
+        await update.message.reply_text("Uso: /debuguid 123456789")
+        return
+
+    uid = context.args[0].strip()
+
+    if not uid.isnumeric():
+        await update.message.reply_text("UID inválido. Usa solo números.")
+        return
+
+    try:
+        resp = okx_affiliate_detail(uid)
+
+        filename = f"debug_okx_uid_{uid}_{datetime.now(TZ_AR).strftime('%Y_%m_%d_%H_%M')}.json"
+        filepath = os.path.join(tempfile.gettempdir(), filename)
+
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(resp, f, ensure_ascii=False, indent=2)
+
+        await context.bot.send_document(
+            chat_id=admin_id,
+            document=open(filepath, "rb"),
+            filename=filename,
+            caption=(
+                "🧪 Debug OKX Affiliate Detail.\n"
+                "Revisa este JSON para confirmar los nombres exactos de campos disponibles."
+            )
+        )
+
+    except Exception as e:
+        print(f"Error en /debuguid UID={uid}: {e}")
+        await update.message.reply_text("❌ Error generando debug del UID.")
+
+
+async def informe(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type != "private":
+        await update.message.reply_text(
+            "Por seguridad, usa /informe en el chat privado con el bot."
+        )
+        return
+
+    admin_id = update.message.from_user.id
+
+    if not is_admin(admin_id):
+        await update.message.reply_text("❌ No autorizado.")
+        return
+
+    users = get_all_users()
+
+    if not users:
+        await update.message.reply_text("No hay usuarios registrados todavía.")
+        return
+
+    updated_rows = []
+
+    for row in users:
+        uid = row["uid"]
+
+        try:
+            if uid == "BYPASS":
+                report = None
+            else:
+                report = get_uid_report(uid)
+
+            if report is None:
+                vol_month = row["last_vol_month"] or 0
+                dep_amt = ""
+                total_vol = ""
+                wd_amt = ""
+                first_trade = ""
+                dep_15d = ""
+                vol_7d = ""
+            else:
+                vol_month = report.get("vol_month") or 0
+                dep_amt = report.get("dep_amt") or 0
+                total_vol = report.get("total_vol") or 0
+                wd_amt = report.get("wd_amt") or 0
+                first_trade = "Si" if report.get("did_first_trade") else "No"
+                dep_15d = report.get("dep_15d") if report.get("dep_15d") is not None else ""
+                vol_7d = report.get("vol_7d") if report.get("vol_7d") is not None else ""
+
+                update_user_volume_by_uid(uid, vol_month)
+
+            time.sleep(0.4)
+
+        except Exception as e:
+            print(f"⚠️ No se pudo actualizar UID={uid}: {e}")
+            vol_month = row["last_vol_month"] or 0
+            dep_amt = ""
+            total_vol = ""
+            wd_amt = ""
+            first_trade = ""
+            dep_15d = ""
+            vol_7d = ""
+
+        updated_rows.append({
+            "telegram_id": row["telegram_id"],
+            "first_name": row["first_name"] or "",
+            "username": row["username"] or "",
+            "uid": uid,
+            "deposito_total_usdt": dep_amt,
+            "deposito_15d_usdt": dep_15d,
+            "volumen_mes_usdt": vol_month,
+            "volumen_7d_usdt": vol_7d,
+            "volumen_total_usdt": total_vol,
+            "retiros_total_usdt": wd_amt,
+            "primer_trade": first_trade,
+            "joined_at": row["joined_at"],
+            "last_checked_at": now_utc_iso()
+        })
+
+    filename = f"informe_flanders_fred_{datetime.now(TZ_AR).strftime('%Y_%m_%d_%H_%M')}.csv"
+    filepath = os.path.join(tempfile.gettempdir(), filename)
+
+    fieldnames = [
+        "telegram_id",
+        "first_name",
+        "username",
+        "uid",
+        "deposito_total_usdt",
+        "deposito_15d_usdt",
+        "volumen_mes_usdt",
+        "volumen_7d_usdt",
+        "volumen_total_usdt",
+        "retiros_total_usdt",
+        "primer_trade",
+        "joined_at",
+        "last_checked_at"
+    ]
+
+    with open(filepath, mode="w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(updated_rows)
+
+    await context.bot.send_document(
+        chat_id=admin_id,
+        document=open(filepath, "rb"),
+        filename=filename,
+        caption="📄 Informe de usuarios Flanders y Fred / OKX"
+    )
+
+
+# -----------------------------
+# REPORTES ADMIN PROGRAMADOS
+# -----------------------------
+async def weekly_admin_report(context: ContextTypes.DEFAULT_TYPE):
+    await generate_admin_report(context, "📊 REPORTE SEMANAL ADMIN FLANDERS Y FRED")
+
+
+async def monthly_admin_report(context: ContextTypes.DEFAULT_TYPE):
+    now = datetime.now(TZ_AR)
+
+    if now.day != 30:
+        return
+
+    await generate_admin_report(context, "📊 REPORTE MENSUAL ADMIN FLANDERS Y FRED")
+
+
+async def generate_admin_report(context, title):
+    total_volumen = 0.0
+    usuarios = get_all_users()
+
+    for u in usuarios:
+        try:
+            if u["uid"] == "BYPASS":
+                continue
+
+            vol = get_uid_volume(u["uid"])
+
+            if vol is not None:
+                total_volumen += vol
+                update_user_volume_by_uid(u["uid"], vol)
+
+            time.sleep(0.4)
+
+        except Exception as e:
+            print(f"Error reporte admin UID={u['uid']}: {e}")
+
+    texto = (
+        f"{title}\n\n"
+        f"Comunidad: {GROUP_NAME}\n"
+        f"Usuarios registrados: {len(usuarios)}\n"
+        f"Volumen acumulado del mes: {total_volumen:.0f} USDT"
+    )
+
+    for admin in ADMIN_IDS:
+        await context.bot.send_message(chat_id=admin, text=texto)
+
+
+# -----------------------------
+# MAIN
+# -----------------------------
+def main():
+    init_db()
+
+    defaults = Defaults(tzinfo=timezone.utc)
+    app = Application.builder().token(BOT_TOKEN).defaults(defaults).build()
+
+    # Base usuario
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("menu", menu))
+    app.add_handler(CallbackQueryHandler(flow_callback))
+
+    # Comandos admin originales Flanders y Fred
+    app.add_handler(CommandHandler("lista", lista))
+    app.add_handler(CommandHandler("listauids", listauids))
+    app.add_handler(CommandHandler("sorteo", sorteo))
+    app.add_handler(CommandHandler("top", top))
+
+    # Comandos admin
+    app.add_handler(CommandHandler("voluid", voluid))
+    app.add_handler(CommandHandler("mivolumen", mivolumen))
+    app.add_handler(CommandHandler("checkuid", checkuid))
+    app.add_handler(CommandHandler("checkuids", checkuids))
+    app.add_handler(CommandHandler("checkuidscsv", checkuidscsv))
+    app.add_handler(CommandHandler("debuguid", debuguid))
+    app.add_handler(CommandHandler("informe", informe))
+
+    # Grupo / acceso VIP
+    app.add_handler(ChatJoinRequestHandler(on_join_request))
+    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, track_new_group_members))
+
+    # Grupo público: responder automáticamente cuando alguien escriba "bot" o "bots"
+    app.add_handler(MessageHandler(
+        filters.Chat(chat_id=PUBLIC_CHAT_ID) & filters.TEXT & ~filters.COMMAND,
+        public_bot_keyword_reply
+    ))
+
+    # Privado: recepción UID
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, handle_private))
+
+    app.job_queue.run_daily(
+        weekly_admin_report,
+        time=datetime.strptime("00:00", "%H:%M").time(),
+        days=(6,),
+        name="weekly_report_flanders_fred"
+    )
+
+    app.job_queue.run_daily(
+        monthly_admin_report,
+        time=datetime.strptime("00:05", "%H:%M").time(),
+        days=(0, 1, 2, 3, 4, 5, 6),
+        name="monthly_admin_report_flanders_fred"
+    )
+
+    affiliate_names = [account["name"] for account in get_affiliate_accounts()]
+
+    print(f"🤖 BOT {GROUP_NAME} iniciado.")
+    print(f"📁 DB_PATH: {DB_PATH}")
+    print(f"📣 Grupo público configurado: {PUBLIC_CHAT_ID}")
+    print(f"🤝 Afiliados configurados: {', '.join(affiliate_names)}")
+
+    app.run_polling()
+
+
+if __name__ == "__main__":
+    main()
+
