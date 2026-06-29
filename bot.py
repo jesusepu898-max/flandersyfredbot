@@ -867,6 +867,28 @@ def start_keyboard():
     ])
 
 
+def action_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✍️ Enviar mi UID de OKX", callback_data="ask_uid")],
+        [InlineKeyboardButton("🔙 Ver menú principal", callback_data="show_menu")],
+    ])
+
+
+def back_to_menu_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔙 Ver menú principal", callback_data="show_menu")],
+    ])
+
+
+def uid_prompt_text():
+    return (
+        "✍️ Perfecto.\n\n"
+        "Ahora envíame tu UID de OKX usando solo números.\n\n"
+        "Ejemplo:\n"
+        "123456789"
+    )
+
+
 def welcome_menu_text():
     return (
         f"👋 Hola, soy el asistente oficial de {GROUP_NAME}.\n\n"
@@ -913,8 +935,7 @@ def new_user_text():
         "📈 Copy trading\n"
         "🎁 Bonos y beneficios especiales\n"
         "📚 Información y soporte para operar en OKX\n\n"
-        "🚀 Así de simple: crea tu cuenta, solicita acceso, valida tu UID y entra a la comunidad VIP para comenzar a participar.\n\n"
-        "Cuando tengas tu UID, envíamelo usando solo números."
+        "🚀 Así de simple: crea tu cuenta, solicita acceso, valida tu UID y entra a la comunidad VIP para comenzar a participar."
     )
 
 
@@ -937,8 +958,7 @@ def existing_user_text():
         "Quiero pertenecer a la comunidad de FLANDERS Y FRED\n\n"
         "Si te aparece un mensaje indicando que por el momento no puedes continuar, escribe al privado de Flanders "
         "y envía tu UID para revisar tu caso:\n\n"
-        f"{FLANDERS_PRIVATE_LINK}\n\n"
-        "Ahora envíame tu UID usando solo números."
+        f"{FLANDERS_PRIVATE_LINK}"
     )
 
 
@@ -963,8 +983,7 @@ def update_ref_text():
         "Quiero pertenecer a la comunidad de FLANDERS Y FRED\n\n"
         "Si te aparece un mensaje indicando que por el momento no puedes continuar, escribe al privado de Flanders "
         "y envía tu UID para revisar tu caso:\n\n"
-        f"{FLANDERS_PRIVATE_LINK}\n\n"
-        "Ahora envíame tu UID usando solo números."
+        f"{FLANDERS_PRIVATE_LINK}"
     )
 
 
@@ -1085,6 +1104,20 @@ async def flow_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = query.from_user
     data = query.data
 
+    if data == "show_menu":
+        await query.edit_message_text(
+            text=welcome_menu_text(),
+            reply_markup=start_keyboard()
+        )
+        return
+
+    if data == "ask_uid":
+        await query.edit_message_text(
+            text=uid_prompt_text(),
+            reply_markup=back_to_menu_keyboard()
+        )
+        return
+
     if data == "flow_new":
         flow = "new"
         text = new_user_text()
@@ -1109,7 +1142,10 @@ async def flow_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         source="button"
     )
 
-    await query.edit_message_text(text=text)
+    await query.edit_message_text(
+        text=text,
+        reply_markup=action_keyboard()
+    )
 
 
 async def on_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1227,8 +1263,8 @@ async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not text.isnumeric():
         await update.message.reply_text(
-            "Para continuar, elige una opción del menú o envíame tu UID de OKX usando solo números.",
-            reply_markup=start_keyboard()
+            "Para continuar, elige una opción o envíame tu UID de OKX usando solo números.",
+            reply_markup=action_keyboard()
         )
         return
 
@@ -1254,7 +1290,8 @@ async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "❌ Hubo un error consultando OKX.\n"
             "Intenta nuevamente más tarde o escribe al privado de Flanders para revisar tu caso:\n\n"
-            f"{FLANDERS_PRIVATE_LINK}"
+            f"{FLANDERS_PRIVATE_LINK}",
+            reply_markup=action_keyboard()
         )
         return
 
@@ -1270,9 +1307,15 @@ async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         if flow == "update":
-            await update.message.reply_text(not_affiliated_update_text())
+            await update.message.reply_text(
+                not_affiliated_update_text(),
+                reply_markup=action_keyboard()
+            )
         else:
-            await update.message.reply_text(not_affiliated_existing_text())
+            await update.message.reply_text(
+                not_affiliated_existing_text(),
+                reply_markup=action_keyboard()
+            )
 
         return
 
@@ -1298,7 +1341,8 @@ async def handle_private(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await context.bot.send_message(
         chat_id=user.id,
-        text=validated_text(flow)
+        text=validated_text(flow),
+        reply_markup=back_to_menu_keyboard()
     )
 
     if approved:
